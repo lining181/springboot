@@ -1,5 +1,6 @@
 package com.hero.services.impl;
 
+import com.hero.converter.OrderMaster2OrderDTOConverter;
 import com.hero.dao.OrderDetailDAO;
 import com.hero.dao.OrderMasterDAO;
 import com.hero.dataobject.OrderDetail;
@@ -13,14 +14,17 @@ import com.hero.enums.ResultEnum;
 import com.hero.exception.MyException;
 import com.hero.services.OrderService;
 import com.hero.services.ProductInfoService;
+import com.hero.services.WebSocket;
 import com.hero.utils.KeyUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -45,6 +49,9 @@ public class OrderServiceImpl implements OrderService{
 
     @Autowired
     private OrderMasterDAO orderMasterDAO;
+
+    @Autowired
+    private WebSocket webSocket;
 
     @Transactional
     @Override
@@ -86,33 +93,83 @@ public class OrderServiceImpl implements OrderService{
         ).collect(Collectors.toList());
         productInfoService.decreaseStock(cartDTOList);
 
-
-        //5.todo 发送websocket消息
+        //5.todo 发送websocket消息,提醒后台有
+        webSocket.sendMessage(orderDTO.getOrderId());
 
         return orderDTO;
     }
 
     @Override
     public OrderDTO findOne(String orderId) {
-        return null;
+        OrderMaster orderMaster = orderMasterDAO.findById(orderId).get();
+        if (orderMaster == null) {
+            throw new MyException(ResultEnum.ORDER_NOT_EXIST);
+        }
+
+        List<OrderDetail> orderDetailList = orderDetailDAO.findByOrderId(orderId);
+        if (CollectionUtils.isEmpty(orderDetailList)) {
+            throw new MyException(ResultEnum.ORDERDETAIL_NOT_EXIST);
+        }
+
+        OrderDTO orderDTO = new OrderDTO();
+        BeanUtils.copyProperties(orderMaster, orderDTO);
+        orderDTO.setOrderDetailList(orderDetailList);
+
+        return orderDTO;
     }
 
     @Override
     public Page<OrderDTO> findList(String buyerOpenid, Pageable pageable) {
-        return null;
+        Page<OrderMaster> orderMasterPage = orderMasterDAO.findByBuyerOpenid(buyerOpenid, pageable);
+
+        List<OrderDTO> orderDTOList = OrderMaster2OrderDTOConverter.convert(orderMasterPage.getContent());
+
+        return new PageImpl<OrderDTO>(orderDTOList, pageable, orderMasterPage.getTotalElements());
     }
 
     @Override
+    @Transactional
     public OrderDTO cancel(OrderDTO orderDTO) {
-        return null;
+        OrderMaster orderMaster = new OrderMaster();
+
+        //判断订单状态
+        if (!orderDTO.getOrderStatus().equals(OrderStatusEnum.NEW.getCode())) {
+            log.error("【取消订单】订单状态不正确, orderId={}, orderStatus={}", orderDTO.getOrderId(), orderDTO.getOrderStatus());
+            throw new MyException(ResultEnum.ORDER_STATUS_ERROR);
+        }
+
+        //修改订单状态
+        orderDTO.setOrderStatus(OrderStatusEnum.CANCEL.getCode());
+        BeanUtils.copyProperties(orderDTO, orderMaster);
+        OrderMaster updateResult = orderMasterDAO.save(orderMaster);
+        if (updateResult == null) {
+            log.error("【取消订单】更新失败, orderMaster={}", orderMaster);
+            throw new MyException(ResultEnum.ORDER_UPDATE_FAIL);
+        }
+
+        //返回库存
+        if (CollectionUtils.isEmpty(orderDTO.getOrderDetailList())) {
+            log.error("【取消订单】订单中无商品详情, orderDTO={}", orderDTO);
+            throw new MyException(ResultEnum.ORDER_DETAIL_EMPTY);
+        }
+        List<CartDTO> cartDTOList = orderDTO.getOrderDetailList().stream()
+                .map(e -> new CartDTO(e.getProductId(), e.getProductQuantity()))
+                .collect(Collectors.toList());
+        productInfoService.increaseStock(cartDTOList);
+
+        //todo 如果已支付, 需要退款
+
+        return orderDTO;
     }
 
     @Override
+    @Transactional
     public OrderDTO finish(OrderDTO orderDTO) {
         return null;
     }
 
     @Override
+    @Transactional
     public OrderDTO paid(OrderDTO orderDTO) {
         return null;
     }
