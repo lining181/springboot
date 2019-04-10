@@ -38,7 +38,7 @@ public class OrderDetail implements Serializable{
     private String productName;
 
     /**
-     * 商品单价
+     * 商品单价 单位元，两位小数
      */
     private BigDecimal productPrice;
 
