@@ -134,22 +134,23 @@ public class OrderServiceImpl implements OrderService{
 
         //判断订单状态
         if (!orderDTO.getOrderStatus().equals(OrderStatusEnum.NEW.getCode())) {
-            log.error("【取消订单】订单状态不正确, orderId={}, orderStatus={}", orderDTO.getOrderId(), orderDTO.getOrderStatus());
+            log.error("[OrderServiceImpl][cancel][订单状态不正确], orderId={}, orderStatus={}", orderDTO.getOrderId(), orderDTO.getOrderStatus());
             throw new MyException(ResultEnum.ORDER_STATUS_ERROR);
         }
 
         //修改订单状态
         orderDTO.setOrderStatus(OrderStatusEnum.CANCEL.getCode());
+        //注意属性拷贝的位置
         BeanUtils.copyProperties(orderDTO, orderMaster);
         OrderMaster updateResult = orderMasterDAO.save(orderMaster);
         if (updateResult == null) {
-            log.error("【取消订单】更新失败, orderMaster={}", orderMaster);
+            log.error("[OrderServiceImpl][cancel][更新失败], orderMaster={}", orderMaster);
             throw new MyException(ResultEnum.ORDER_UPDATE_FAIL);
         }
 
         //返回库存
         if (CollectionUtils.isEmpty(orderDTO.getOrderDetailList())) {
-            log.error("【取消订单】订单中无商品详情, orderDTO={}", orderDTO);
+            log.error("[OrderServiceImpl][cancel][订单中无商品详情], orderDTO={}", orderDTO);
             throw new MyException(ResultEnum.ORDER_DETAIL_EMPTY);
         }
         List<CartDTO> cartDTOList = orderDTO.getOrderDetailList().stream()
@@ -165,17 +166,61 @@ public class OrderServiceImpl implements OrderService{
     @Override
     @Transactional
     public OrderDTO finish(OrderDTO orderDTO) {
-        return null;
+        //判断订单状态
+        if (!orderDTO.getOrderStatus().equals(OrderStatusEnum.NEW.getCode())) {
+            log.error("[OrderServiceImpl][cancel]【完结订单】订单状态不正确, orderId={}, orderStatus={}", orderDTO.getOrderId(), orderDTO.getOrderStatus());
+            throw new MyException(ResultEnum.ORDER_STATUS_ERROR);
+        }
+
+        //修改订单状态
+        orderDTO.setOrderStatus(OrderStatusEnum.FINISHED.getCode());
+        OrderMaster orderMaster = new OrderMaster();
+        BeanUtils.copyProperties(orderDTO, orderMaster);
+        OrderMaster updateResult = orderMasterDAO.save(orderMaster);
+        if (updateResult == null) {
+            log.error("[OrderServiceImpl][cancel]【完结订单】更新失败, orderMaster={}", orderMaster);
+            throw new MyException(ResultEnum.ORDER_UPDATE_FAIL);
+        }
+
+        //推送微信模版消息
+
+        return orderDTO;
     }
 
     @Override
     @Transactional
     public OrderDTO paid(OrderDTO orderDTO) {
-        return null;
+        //判断订单状态
+        if (!orderDTO.getOrderStatus().equals(OrderStatusEnum.NEW.getCode())) {
+            log.error("[OrderServiceImpl][cancel][订单状态不正确], orderId={}, orderStatus={}", orderDTO.getOrderId(), orderDTO.getOrderStatus());
+            throw new MyException(ResultEnum.ORDER_STATUS_ERROR);
+        }
+
+        //判断支付状态
+        if (!orderDTO.getPayStatus().equals(PayStatusEnum.WAIT.getCode())) {
+            log.error("[OrderServiceImpl][paid][订单支付状态不正确],, orderDTO={}", orderDTO);
+            throw new MyException(ResultEnum.ORDER_PAY_STATUS_ERROR);
+        }
+
+        //修改支付状态
+        orderDTO.setPayStatus(PayStatusEnum.SUCCESS.getCode());
+        OrderMaster orderMaster = new OrderMaster();
+        BeanUtils.copyProperties(orderDTO, orderMaster);
+        OrderMaster updateResult = orderMasterDAO.save(orderMaster);
+        if (updateResult == null) {
+            log.error("[OrderServiceImpl][paid][更新失败], orderMaster={}", orderMaster);
+            throw new MyException(ResultEnum.ORDER_UPDATE_FAIL);
+        }
+
+        return orderDTO;
     }
 
     @Override
     public Page<OrderDTO> findList(Pageable pageable) {
-        return null;
+        Page<OrderMaster> orderMasterPage = orderMasterDAO.findAll(pageable);
+
+        List<OrderDTO> orderDTOList = OrderMaster2OrderDTOConverter.convert(orderMasterPage.getContent());
+
+        return new PageImpl<>(orderDTOList, pageable, orderMasterPage.getTotalElements());
     }
 }
